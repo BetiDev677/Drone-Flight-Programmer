@@ -1,0 +1,64 @@
+/*
+ */
+
+#include <Wire.h>;
+ #include <Madgwick.h>;
+ #include <MPU9250.h>;
+ Magdwick filter;
+ MPU9250 mpu(Wire, 0x68);
+ AK8963 mag(Wire, 0x0C);
+ float rawX, rawY, rawY; //make variables for accelerometer data
+ float GX, GY, GZ, StableGX, StableGY, StableGZ; //make variables for gyro data
+ float error, lastError, integral, derivative;
+ float time, timePrev, Timelapsed
+ float Kp = 1, Ki = 1, Kd = 1;
+ float desired_angle = 0;
+ float rad_to_deg = 180/3.141592654;
+ int16_t x,y,x;
+ float magX, magY, magZ;
+
+
+
+
+void setup() {
+  // put your setup code here, to run once:
+ time = millis();
+ int status = wire.begin();
+ if (status < 0){
+  Serial.print("MPU failed to initialize"); //error message
+  while (1); // end program
+  }
+//X=y/x, Y= x/y, Z = z/x
+}
+
+
+
+
+void loop() {
+  // put your  main code here, to run repeatedly:
+timePrev = time;
+time = millis();
+Timelapsed = (time - timePrev)/ 1000;
+Serial.begin();
+Wire.begin();
+mpu.readSensor();
+rawX = mpu.getAccelX_mss();
+rawY= mpu.getAccelY_mss();
+rawZ = mpu.getAccelZ_mss();
+GX = mpu.getGyroX_rads();
+GY = mpu.getGyroY_rads();
+GZ = mpu.getGyroZ_rads();
+Wire.beginTransmission();
+
+
+filter.update(rawX, rawY, rawZ, GX, GY, GZ)
+float roll = filter.getRoll;
+float pitch = filter.getPitch;
+float yaw = filter.getYaw;
+Wire.begin
+float yawInRange(float yaw) {
+   while (yaw > 180) yaw -= 360;
+   while (yaw < -180) yaw += 360;
+   return yaw
+ }
+}
