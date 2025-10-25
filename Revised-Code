@@ -1,0 +1,57 @@
+include <Kalman.h>
+#include <Adafruit_LSM303DLH_Mag.h>
+#include <MadgwickAHRS.h>
+#include <MPU6050_light.h>
+MPU6050 mpu(Wire);
+Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
+long timer = 0;
+float magX, magY, magZ;
+float offsets;
+float roll, pitch, yaw;
+float AX, AY, AZ, GX, GY, GZ, MX, MY, MZ;
+double kp, kd, ki;
+
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  byte status = mpu.begin():
+  if (status < 0) {
+    Serial.println("MPU failed to initialize!");
+    while (1)
+  } else {
+    offsets = mpu.calcOffsets();
+  }
+  sensor_t sensor;
+  mag.getSensor(&sensor)    
+  
+}
+
+void loop() {
+    mpu.update();
+    sensors_event_t event; 
+    mag.getEvent(&event);
+  if (millis - timer > 1000) {
+    AX = mpu.getAccX;
+    AY = mpu.getAccY;
+    AZ = mpu.getAccZ;
+    GX = mpu.getGyroX;
+    GY = mpu.getGyroY;
+    GZ = mpu.getGyroZ;
+    magX = magnetic.event.x;
+    magY = magnetic.event.y;
+    magZ = magnetic.event.z;
+    AX = convertRawAcceleration(AX);
+    AY = convertRawAcceleration(AY);
+    AZ = convertRawAcceleration(AZ);
+    GX = convertRawGyro(GX);
+    GY = convertRawGyro(GY);
+    GZ = convertRawGyro(GZ);
+    filter.update(AX, AY, AZ, GX, GY, GZ)
+    roll = filter.getRoll();
+    roll = filter.getPitch();
+    yaw = filter.getYaw();
+    
+  }
+    
+} 
