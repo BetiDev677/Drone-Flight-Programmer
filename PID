@@ -1,63 +1,105 @@
 #include <Wire.h>
 #include <mpu6050_FastAngles.h>
 #include <Math.h>
+
 double Kp_roll = 1.0, Ki_roll = 0.0, Kd_roll = 0.0;
 double Kp_pitch = 1.0, Ki_pitch = 0.0, Kd_pitch = 0.0;
 double Kp_yaw = 0.5, Ki_yaw = 0.0, Kd_yaw = 0.0;
+
 double errorX, errorY, errorZ;
+
+double integralX, prevErrorX = 0.0;
+double integralY, prevErrorY = 0.00;
+double integralZ, prevErrorZ = 0.0;
+double rollOut, pitchOut, yawOut;
+
+float throttle_input = 500.0; //placeholder
+
+unsigned long prevTime;
+const int PIDinterval = 100;
+unsigned long currentTime;
+
 mpu6050_FastAngles mpu;
+
+const int setpoint = 0;
+
 const float directional_heading = -4.09;
 const float rad_to_deg = 180/PI;
 float yaw, magnetic_heading;
-magAddress = 0x0D;
+const byte magAddress = 0x0D;
+
+
 void setup() {
   
-    Serial.begin(9600);
+    Serial.begin(115200);
     Wire.begin();
     mpu.PrintSettings();
- 
+    Wire.beginTransmission(magAddress);
+    Wire.write(0x09); //mode register
+    Wire.write(0x01); //continuous data reading mode
+    Wire.endTransmission();
 }
 
 void loop() {
- time = micros;
- float roll = mpu.getAngle('X', KALMAN);
- float pitch = mpu.getAngle('Y', KALMAN);
- float angleZ = mpu.getAngle('Z');
-  Wire.beginTransmission(magAddress);
-  Wire.write(0x00);
-  Wire.endTransmission();
-  Wire.requestFrom(magAddress, 6);
-  byte x_lsb = Wire.read();
-  byte x_msb = Wire.read();
-  byte y_lsb = Wire.read();
-  byte y_msb = Wire.read();
-  byte z_lsb = Wire.read();
-  byte z_msb = Wire.read();
-  int16_t magx = x_msb << 8|x_lsb;
-  int16_t magy = y_msb << 8|y_lsb;
-  int16_t magz = z_msb << 8|z_lsb;
+  unsigned long currentTime = millis();
+  if (currentTime - prevTime >= PIDinterval){
+    prevTime = currentTime;
+   float roll = mpu.getAngle('X', KALMAN);
+   float pitch = mpu.getAngle('Y', KALMAN);
+   float yaw = mpu.getAngle('Z');
+   Wire.beginTransmission(magAddress);
+   Wire.write(0x00);
+   Wire.endTransmission();
+   Wire.requestFrom(magAddress, 6);
+   byte x_lsb = Wire.read();
+   byte x_msb = Wire.read();
+   byte y_lsb = Wire.read();
+   byte y_msb = Wire.read();
+   byte z_lsb = Wire.read();
+   byte z_msb = Wire.read();
+   int16_t magx = x_msb << 8|x_lsb;
+   int16_t magy = y_msb << 8|y_lsb;
+   int16_t magz = z_msb << 8|z_lsb;
 
-  magnetic_heading = atan2(magy,magx)*rad_to_deg;
+   magnetic_heading = atan2(magy,magx)*rad_to_deg;
   
-  if (magnetic_heading) < 0 {
-    magnetic_heading = magnetic_heading + 360;
-  }
-  if (magnetic_heading > 360) {
+   if (magnetic_heading < 0) {
+     magnetic_heading = magnetic_heading + 360;
+   }
+   if (magnetic_heading > 360) {
     magnetic_heading = magnetic_heading - 360;
-  }
+   }
   
-  yaw = magnetic_heading + directional_heading;
+   yaw = magnetic_heading + directional_heading;
 
-  if (yaw < 0) {
-    yaw = yaw + 360;
+   if (yaw < -180) yaw = yaw + 360;
+   if (yaw > 180) yaw = yaw - 360;
+   if (roll < -180) roll = roll + 360;
+   if (roll > 180) roll = roll - 360;
+   if (pitch < -180) pitch = pitch + 360;
+   if (pitch > 180)  pitch = pitch - 360;
+  
+    float yawSetpoint = 0; //MAKE IT SO IT READS CONTROLLER
+    errorX =  setpoint - roll;
+    errorY = setpoint - pitch;
+    errorZ = yawSetpoint - yaw;
+    errorZ = fmodf(errorZ + 180.0, 360.0) - 180.0;
+   double dt  = (double)PIDinterval/1000.0;
+    
+    integralX += errorX * dt;
+    double derivativeX = (errorX - prevErrorX)/dt;
+    rollOut = Kp_roll * errorX + Ki_roll* integralX+ Kd_roll * derivativeX;
+    prevErrorX = errorX;
+
+    integralY += errorY * dt;
+    double derivativeY = (errorY - prevErrorY) / dt;
+    pitchOut = Kp_pitch * errorY+Ki_pitch * integralY + Kd_pitch * derivativeY;
+    prevErrorY = errorY;
+
+    integralZ += errorZ *dt;
+    double derivativeZ = (errorY - prevErrorY) / dt;
+    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivateZ;
+    prevErrorZ = errorZ;
+    
   }
-  if (yaw > 360) {
-    yaw = yaw - 360;
-  }
-
-errorX =  setpoint - roll;
-errorY = setpoint - pitch;
-errorZ = setpoint - yaw;
-currentTime = time;
-
 }
