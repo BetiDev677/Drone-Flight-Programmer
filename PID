@@ -1,34 +1,3 @@
-#include <Wire.h>
-#include <mpu6050_FastAngles.h>
-#include <Math.h>
-
-double Kp_roll = 1.0, Ki_roll = 0.0, Kd_roll = 0.0;
-double Kp_pitch = 1.0, Ki_pitch = 0.0, Kd_pitch = 0.0;
-double Kp_yaw = 0.5, Ki_yaw = 0.0, Kd_yaw = 0.0;
-
-double errorX, errorY, errorZ;
-
-double integralX, prevErrorX = 0.0;
-double integralY, prevErrorY = 0.00;
-double integralZ, prevErrorZ = 0.0;
-double rollOut, pitchOut, yawOut;
-
-float throttle_input = 500.0; //placeholder
-
-unsigned long prevTime;
-const int PIDinterval = 100;
-unsigned long currentTime;
-
-mpu6050_FastAngles mpu;
-
-const int setpoint = 0;
-
-const float directional_heading = -4.09;
-const float rad_to_deg = 180/PI;
-float yaw, magnetic_heading;
-const byte magAddress = 0x0D;
-
-
 void setup() {
   
     Serial.begin(115200);
@@ -98,7 +67,7 @@ void loop() {
 
     integralZ += errorZ *dt;
     double derivativeZ = (errorY - prevErrorY) / dt;
-    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivateZ;
+    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivativeZ;
     prevErrorZ = errorZ;
     
   }
