@@ -95,16 +95,26 @@ void loop() {
     double derivativeX = (errorX - prevErrorX)/dt;
     rollOut = Kp_roll * errorX + Ki_roll* integralX+ Kd_roll * derivativeX;
     prevErrorX = errorX;
+    if (rollOut < -500) rollOut += 500;
+    if (rollOut > 500) rollOut -= 500;
+
+
 
     integralY += errorY * dt;
     double derivativeY = (errorY - prevErrorY) / dt;
     pitchOut = Kp_pitch * errorY+Ki_pitch * integralY + Kd_pitch * derivativeY;
     prevErrorY = errorY;
+    if (pitchOut < -500) pitchOut += 500;
+    if (pitchOut > 500) pitchOut -= 500;
+
 
     integralZ += errorZ *dt;
     double derivativeZ = (errorZ - prevErrorZ) / dt;
     yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_yaw *derivativeZ;
     prevErrorZ = errorZ;
+    if (yawOut < -500) yawOut += 500;
+    if (yawOut > 500) yawOut -= 500;
+
 
     const int MIN = 100;
     const int MAX = 1000;
