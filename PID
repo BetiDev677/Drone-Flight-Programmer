@@ -103,7 +103,7 @@ void loop() {
 
     integralZ += errorZ *dt;
     double derivativeZ = (errorZ - prevErrorZ) / dt;
-    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivativeZ;
+    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_yaw *derivativeZ;
     prevErrorZ = errorZ;
 
     const int MIN = 100;
