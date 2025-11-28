@@ -1,3 +1,39 @@
+#include <Wire.h>
+#include <mpu6050_FastAngles.h>
+#include <Math.h>
+
+const int motorFR = 12; //placeholder
+const int motorFL = 11; //placeholder
+const int motorBR = 10; //placeholder
+const int motor BL = 9; // placeholder 
+const int esp32 = 0;
+double Kp_roll = 1.0, Ki_roll = 0.0, Kd_roll = 0.0;
+double Kp_pitch = 1.0, Ki_pitch = 0.0, Kd_pitch = 0.0;
+double Kp_yaw = 0.5, Ki_yaw = 0.0, Kd_yaw = 0.0;
+
+double errorX, errorY, errorZ;
+
+double integralX, prevErrorX = 0.0;
+double integralY, prevErrorY = 0.00;
+double integralZ, prevErrorZ = 0.0;
+double rollOut, pitchOut, yawOut;
+
+float throttle_input = 500.0; //placeholder
+
+unsigned long prevTime;
+const int PIDinterval = 100;
+unsigned long currentTime;
+
+mpu6050_FastAngles mpu;
+
+const int setpoint = 0;
+
+const float directional_heading = -4.09;
+const float rad_to_deg = 180/PI;
+float magnetic_heading;
+const byte magAddress = 0x0D;
+
+
 void setup() {
   
     Serial.begin(115200);
@@ -48,7 +84,7 @@ void loop() {
    if (pitch < -180) pitch = pitch + 360;
    if (pitch > 180)  pitch = pitch - 360;
   
-    float yawSetpoint = 0; //MAKE IT SO IT READS CONTROLLER
+    float yawSetpoint = 0; //MAKE IT SO IT READS CONTROLLER  shouldn't do online remote, probably have to do rc even tho it's expensive
     errorX =  setpoint - roll;
     errorY = setpoint - pitch;
     errorZ = yawSetpoint - yaw;
@@ -66,9 +102,12 @@ void loop() {
     prevErrorY = errorY;
 
     integralZ += errorZ *dt;
-    double derivativeZ = (errorY - prevErrorY) / dt;
+    double derivativeZ = (errorZ - prevErrorZ) / dt;
     yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivativeZ;
     prevErrorZ = errorZ;
+
+    const int MIN = 100;
+    const int MAX = 1000;
     
   }
 }
