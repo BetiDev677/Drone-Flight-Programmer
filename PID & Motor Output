@@ -1,11 +1,15 @@
+
+#include <ESP32ServoController.h>
 #include <Wire.h>
 #include <mpu6050_FastAngles.h>
 #include <Math.h>
 
+const int16_t pwmPeriodUs = 250; //might have to change to 2k if its a standard analog ESC
+const int pwmMin = 125; //might have to change to 1k if its a standard analog ESC
 const int motorFR = 12; //placeholder
 const int motorFL = 11; //placeholder
 const int motorBR = 10; //placeholder
-const int motor BL = 9; // placeholder 
+const int motorBL = 9; // placeholder 
 const int esp32 = 0;
 double Kp_roll = 1.0, Ki_roll = 0.0, Kd_roll = 0.0;
 double Kp_pitch = 1.0, Ki_pitch = 0.0, Kd_pitch = 0.0;
@@ -21,7 +25,7 @@ double rollOut, pitchOut, yawOut;
 float throttle_input = 500.0; //placeholder
 
 unsigned long prevTime;
-const int PIDinterval = 100;
+const int PIDinterval = 4;
 unsigned long currentTime;
 
 mpu6050_FastAngles mpu;
@@ -32,7 +36,10 @@ const float directional_heading = -4.09;
 const float rad_to_deg = 180/PI;
 float magnetic_heading;
 const byte magAddress = 0x0D;
-
+ServoController servoFR;
+ServoController servoFL;
+ServoController servoBR;
+ServoController servoBL;
 
 void setup() {
   
@@ -43,10 +50,23 @@ void setup() {
     Wire.write(0x09); //mode register
     Wire.write(0x01); //continuous data reading mode
     Wire.endTransmission();
+    Esp32LedcRegistry::instance()->begin();
+  
+    servoFR.attach(motorFR, pwmPeriodUs, 1000);
+    servoFL.attach(motorFL, pwmPeriodUs, 1000);
+    servoBR.attach(motorBR, pwmPeriodUs, 1000);
+    servoBL.attach(motorBL, pwmPeriodUs, 1000);
+  
+    servoFR.writeMicroseconds(1000);
+    servoFL.writeMicroseconds(1000);
+    servoBR.writeMicroseconds(1000);
+    servoBL.writeMicroseconds(1000);
+    delay(2000);
+  
 }
 
 void loop() {
-  unsigned long currentTime = millis();
+  unsigned long currentTime = micros();
   if (currentTime - prevTime >= PIDinterval){
     prevTime = currentTime;
    float roll = mpu.getAngle('X', KALMAN);
@@ -95,29 +115,34 @@ void loop() {
     double derivativeX = (errorX - prevErrorX)/dt;
     rollOut = Kp_roll * errorX + Ki_roll* integralX+ Kd_roll * derivativeX;
     prevErrorX = errorX;
-    if (rollOut < -500) rollOut += 500;
-    if (rollOut > 500) rollOut -= 500;
-
-
 
     integralY += errorY * dt;
     double derivativeY = (errorY - prevErrorY) / dt;
     pitchOut = Kp_pitch * errorY+Ki_pitch * integralY + Kd_pitch * derivativeY;
     prevErrorY = errorY;
-    if (pitchOut < -500) pitchOut += 500;
-    if (pitchOut > 500) pitchOut -= 500;
-
 
     integralZ += errorZ *dt;
     double derivativeZ = (errorZ - prevErrorZ) / dt;
-    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_yaw *derivativeZ;
+    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivativeZ;
     prevErrorZ = errorZ;
-    if (yawOut < -500) yawOut += 500;
-    if (yawOut > 500) yawOut -= 500;
+    float motorFL_val = throttle_input - pitchOut + rollOut + yawOut;
+    float motorFR_val = throttle_input - pitchOut - rollOut - yawOut;
+    float motorBL_val = throttle_input + pitchOut + rollOut - yawOut;
+    float motorBR_val = throttle_input + pitchOut - rollOut + yawOut;
 
+    const int MIN_ESC_PULSE = 1000;
+    const int MAX_ESC_PULSE = 2000;
+   
+    motorFL_val = constrain(motorFL_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+    motorFR_val = constrain(motorFR_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+    motorBL_val = constrain(motorBL_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+    motorBR_val = constrain(motorBR_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
 
-    const int MIN = 100;
-    const int MAX = 1000;
+    servoFL.writeMicroseconds(static_cast<uint16_t>(motorFL_val));
+    servoFR.writeMicroseconds(static_cast<uint16_t>(motorFR_val));
+    servoBL.writeMicroseconds(static_cast<uint16_t>(motorBL_val));
+    servoBR.writeMicroseconds(static_cast<uint16_t>(motorBR_val));
+
     
   }
 }
