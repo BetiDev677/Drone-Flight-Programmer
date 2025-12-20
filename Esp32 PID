@@ -1,0 +1,148 @@
+
+#include <ESP32ServoController.h>
+#include <Wire.h>
+#include <mpu6050_FastAngles.h>
+#include <Math.h>
+
+const int16_t pwmPeriodUs = 250; //might have to change to 2k if its a standard analog ESC
+const int pwmMin = 125; //might have to change to 1k if its a standard analog ESC
+const int motorFR = 12; //placeholder
+const int motorFL = 11; //placeholder
+const int motorBR = 10; //placeholder
+const int motorBL = 9; // placeholder 
+const int esp32 = 0;
+double Kp_roll = 1.0, Ki_roll = 0.0, Kd_roll = 0.0;
+double Kp_pitch = 1.0, Ki_pitch = 0.0, Kd_pitch = 0.0;
+double Kp_yaw = 0.5, Ki_yaw = 0.0, Kd_yaw = 0.0;
+
+double errorX, errorY, errorZ;
+
+double integralX, prevErrorX = 0.0;
+double integralY, prevErrorY = 0.00;
+double integralZ, prevErrorZ = 0.0;
+double rollOut, pitchOut, yawOut;
+
+float throttle_input = 500.0; //placeholder
+
+unsigned long prevTime;
+const int PIDinterval = 4;
+unsigned long currentTime;
+
+mpu6050_FastAngles mpu;
+
+const int setpoint = 0;
+
+const float directional_heading = -4.09;
+const float rad_to_deg = 180/PI;
+float magnetic_heading;
+const byte magAddress = 0x0D;
+ServoController servoFR;
+ServoController servoFL;
+ServoController servoBR;
+ServoController servoBL;
+
+void setup() {
+  
+    Serial.begin(115200);
+    Wire.begin();
+    mpu.PrintSettings();
+    Wire.beginTransmission(magAddress);
+    Wire.write(0x09); //mode register
+    Wire.write(0x01); //continuous data reading mode
+    Wire.endTransmission();
+    Esp32LedcRegistry::instance()->begin();
+  
+    servoFR.attach(motorFR, pwmPeriodUs, 1000);
+    servoFL.attach(motorFL, pwmPeriodUs, 1000);
+    servoBR.attach(motorBR, pwmPeriodUs, 1000);
+    servoBL.attach(motorBL, pwmPeriodUs, 1000);
+  
+    servoFR.writeMicroseconds(1000);
+    servoFL.writeMicroseconds(1000);
+    servoBR.writeMicroseconds(1000);
+    servoBL.writeMicroseconds(1000);
+    delay(2000);
+  
+}
+
+void loop() {
+  unsigned long currentTime = micros();
+  if (currentTime - prevTime >= PIDinterval){
+    prevTime = currentTime;
+   float roll = mpu.getAngle('X', KALMAN);
+   float pitch = mpu.getAngle('Y', KALMAN);
+   float yaw = mpu.getAngle('Z');
+   Wire.beginTransmission(magAddress);
+   Wire.write(0x00);
+   Wire.endTransmission();
+   Wire.requestFrom(magAddress, 6);
+   byte x_lsb = Wire.read();
+   byte x_msb = Wire.read();
+   byte y_lsb = Wire.read();
+   byte y_msb = Wire.read();
+   byte z_lsb = Wire.read();
+   byte z_msb = Wire.read();
+   int16_t magx = x_msb << 8|x_lsb;
+   int16_t magy = y_msb << 8|y_lsb;
+   int16_t magz = z_msb << 8|z_lsb;
+
+   magnetic_heading = atan2(magy,magx)*rad_to_deg;
+  
+   if (magnetic_heading < 0) {
+     magnetic_heading = magnetic_heading + 360;
+   }
+   if (magnetic_heading > 360) {
+    magnetic_heading = magnetic_heading - 360;
+   }
+  
+   yaw = magnetic_heading + directional_heading;
+
+   if (yaw < -180) yaw = yaw + 360;
+   if (yaw > 180) yaw = yaw - 360;
+   if (roll < -180) roll = roll + 360;
+   if (roll > 180) roll = roll - 360;
+   if (pitch < -180) pitch = pitch + 360;
+   if (pitch > 180)  pitch = pitch - 360;
+  
+    float yawSetpoint = 0; //MAKE IT SO IT READS CONTROLLER  shouldn't do online remote, probably have to do rc even tho it's expensive
+    errorX =  setpoint - roll;
+    errorY = setpoint - pitch;
+    errorZ = yawSetpoint - yaw;
+    errorZ = fmodf(errorZ + 180.0, 360.0) - 180.0;
+   double dt  = (double)PIDinterval/1000.0;
+    
+    integralX += errorX * dt;
+    double derivativeX = (errorX - prevErrorX)/dt;
+    rollOut = Kp_roll * errorX + Ki_roll* integralX+ Kd_roll * derivativeX;
+    prevErrorX = errorX;
+
+    integralY += errorY * dt;
+    double derivativeY = (errorY - prevErrorY) / dt;
+    pitchOut = Kp_pitch * errorY+Ki_pitch * integralY + Kd_pitch * derivativeY;
+    prevErrorY = errorY;
+
+    integralZ += errorZ *dt;
+    double derivativeZ = (errorZ - prevErrorZ) / dt;
+    yawOut = Kp_yaw * errorZ + Ki_yaw*integralZ + Kd_pitch *derivativeZ;
+    prevErrorZ = errorZ;
+    float motorFL_val = throttle_input - pitchOut + rollOut + yawOut;
+    float motorFR_val = throttle_input - pitchOut - rollOut - yawOut;
+    float motorBL_val = throttle_input + pitchOut + rollOut - yawOut;
+    float motorBR_val = throttle_input + pitchOut - rollOut + yawOut;
+
+    const int MIN_ESC_PULSE = 1000;
+    const int MAX_ESC_PULSE = 2000;
+   
+    motorFL_val = constrain(motorFL_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+    motorFR_val = constrain(motorFR_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+    motorBL_val = constrain(motorBL_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+    motorBR_val = constrain(motorBR_val, MIN_ESC_PULSE, MAX_ESC_PULSE);
+
+    servoFL.writeMicroseconds(static_cast<uint16_t>(motorFL_val));
+    servoFR.writeMicroseconds(static_cast<uint16_t>(motorFR_val));
+    servoBL.writeMicroseconds(static_cast<uint16_t>(motorBL_val));
+    servoBR.writeMicroseconds(static_cast<uint16_t>(motorBR_val));
+
+    
+  }
+}
