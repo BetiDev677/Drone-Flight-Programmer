@@ -15,24 +15,20 @@ const float ACCEL_SCALE = 16384.0;
 const float GYRO_SCALE  = 131.0;
 const float G = 9.80665;
 
-// Timing
-unsigned long lastMicros = 0;
-float dt;
-
 // Target angles
 float targetPitch = 0.0;
 float targetRoll  = 0.0;
 float targetYaw   = 0.0;
 
-// PID gains (START SMALL)
-float Kp = 2.0;
-float Ki = 0.0;
-float Kd = 0.15;
+// PID gains
+float Kp_roll = 42, Kp_pitch = 44, Kp_yaw = 40; //roll: 40-45 pitch: 42-48
+float Ki_roll = 77, Ki_pitch = 77, Ki_yaw = 80; //roll & pitch: 75-85
+float Kd_roll = 22, Kd_pitch = 24, Kd_yaw = 0; // roll: 20-28 pitch: 22-30
 
-// PID state
-float pitchError, pitchPrevError;
-float pitchIntegral;
-float pitchOutput;
+// PID state for all axes
+float pitchError, pitchPrevError, pitchIntegral, pitchOutput;
+float rollError, rollPrevError, rollIntegral, rollOutput;
+float yawError, yawPrevError, yawIntegral, yawOutput;
 
 void setup() {
   Serial.begin(115200);
@@ -41,20 +37,16 @@ void setup() {
 
   mpu.initialize();
   compass.init();
-
   fuser.init(200, 0.98, 0.98);  // 200 Hz fusion
 
   if (!mpu.testConnection()) {
     Serial.println("MPU6050 FAILED");
     while (1);
   }
-  pinMode(buttonPin, INPUT_PULLUP);
-
-  lastMicros = micros();
 }
 
 void loop() {
-
+  // --- Read raw sensors ---
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
@@ -68,29 +60,45 @@ void loop() {
   gyro.y = gy / GYRO_SCALE * DEG_TO_RAD;
   gyro.z = gz / GYRO_SCALE * DEG_TO_RAD;
 
+  // --- Update fusion (200 Hz) ---
   if (fuser.shouldUpdateData()) {
-
     fuser.getFilteredAngles(accel, gyro, &fusedAngles, UNIT_DEGREES);
 
-    // ---- PID (Pitch example) ----
-    float dt = 1.0 / 200.0;  // MUST match fuser.init(200, ...)
+    float dt = 1.0 / 200.0; // matches fuser.init(200,...)
 
+    // --- Pitch PID ---
     pitchError = targetPitch - fusedAngles.pitch;
     pitchIntegral += pitchError * dt;
     float pitchDerivative = (pitchError - pitchPrevError) / dt;
-
-    pitchOutput =
-        Kp * pitchError +
-        Ki * pitchIntegral +
-        Kd * pitchDerivative;
-
+    pitchOutput = Kp_pitch*pitchError + Ki_pitch*pitchIntegral + Kd_pitch*pitchDerivative;
     pitchPrevError = pitchError;
 
-    if (digitalRead(buttonPin) == HIGH) { //wire button into GND
-     Serial.print("Pitch: ");
-     Serial.print(fusedAngles.pitch);
-     Serial.print(" | PID: ");
-     Serial.println(pitchOutput);
+    // --- Roll PID ---
+    rollError = targetRoll - fusedAngles.roll;
+    rollIntegral += rollError * dt;
+    float rollDerivative = (rollError - rollPrevError) / dt;
+    rollOutput = Kp_roll*rollError + Ki_roll*rollIntegral + Kd_roll*rollDerivative;
+    rollPrevError = rollError;
+
+    // --- Yaw PID ---
+    compass.read();
+    float yawMeasured = compass.getAzimuth();
+    yawError = targetYaw - yawMeasured;
+    yawIntegral += yawError * dt;
+    float yawDerivative = (yawError - yawPrevError) / dt;
+    yawOutput = Kp_yaw*yawError + Ki_yaw*yawIntegral + Kd_yaw*yawDerivative;
+    yawPrevError = yawError;
+
+    // --- Print all three axes while button is pressed ---
+    if (digitalRead(buttonPin) == LOW) { // button wired to GND
+      Serial.println("Pitch: "); Serial.print(fusedAngles.pitch);
+      Serial.println(" | PID: "); Serial.print(pitchOutput);
+
+      Serial.println(" || Roll: "); Serial.print(fusedAngles.roll);
+      Serial.println(" | PID: "); Serial.print(rollOutput);
+
+      Serial.println(" || Yaw: "); Serial.print(yawMeasured);
+      Serial.println(" | PID: "); Serial.println(yawOutput);
     }
   }
 }
