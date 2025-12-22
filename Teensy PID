@@ -1,1 +1,96 @@
-oh
+#include <Wire.h>
+#include <MPU6050.h>
+#include <QMC5883LCompass.h>
+#include <simpleFusion.h>
+
+MPU6050 mpu;
+QMC5883LCompass compass;
+SimpleFusion fuser;
+FusedAngles fusedAngles;
+
+const int buttonPin = 7;
+
+// MPU constants
+const float ACCEL_SCALE = 16384.0;
+const float GYRO_SCALE  = 131.0;
+const float G = 9.80665;
+
+// Timing
+unsigned long lastMicros = 0;
+float dt;
+
+// Target angles
+float targetPitch = 0.0;
+float targetRoll  = 0.0;
+float targetYaw   = 0.0;
+
+// PID gains (START SMALL)
+float Kp = 2.0;
+float Ki = 0.0;
+float Kd = 0.15;
+
+// PID state
+float pitchError, pitchPrevError;
+float pitchIntegral;
+float pitchOutput;
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  pinMode(buttonPin, INPUT_PULLUP);
+
+  mpu.initialize();
+  compass.init();
+
+  fuser.init(200, 0.98, 0.98);  // 200 Hz fusion
+
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 FAILED");
+    while (1);
+  }
+  pinMode(buttonPin, INPUT_PULLUP);
+
+  lastMicros = micros();
+}
+
+void loop() {
+
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+  ThreeAxis accel;
+  accel.x = ax / ACCEL_SCALE * G;
+  accel.y = ay / ACCEL_SCALE * G;
+  accel.z = az / ACCEL_SCALE * G;
+
+  ThreeAxis gyro;
+  gyro.x = gx / GYRO_SCALE * DEG_TO_RAD;
+  gyro.y = gy / GYRO_SCALE * DEG_TO_RAD;
+  gyro.z = gz / GYRO_SCALE * DEG_TO_RAD;
+
+  if (fuser.shouldUpdateData()) {
+
+    fuser.getFilteredAngles(accel, gyro, &fusedAngles, UNIT_DEGREES);
+
+    // ---- PID (Pitch example) ----
+    float dt = 1.0 / 200.0;  // MUST match fuser.init(200, ...)
+
+    pitchError = targetPitch - fusedAngles.pitch;
+    pitchIntegral += pitchError * dt;
+    float pitchDerivative = (pitchError - pitchPrevError) / dt;
+
+    pitchOutput =
+        Kp * pitchError +
+        Ki * pitchIntegral +
+        Kd * pitchDerivative;
+
+    pitchPrevError = pitchError;
+
+    if (digitalRead(buttonPin) == HIGH) { //wire button into GND
+     Serial.print("Pitch: ");
+     Serial.print(fusedAngles.pitch);
+     Serial.print(" | PID: ");
+     Serial.println(pitchOutput);
+    }
+  }
+}
