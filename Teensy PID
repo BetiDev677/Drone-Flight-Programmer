@@ -8,7 +8,7 @@ QMC5883LCompass compass;
 SimpleFusion fuser;
 FusedAngles fusedAngles;
 
-const int buttonPin = 7;
+const int buttonPin = A0;
 
 // MPU constants
 const float ACCEL_SCALE = 16384.0;
@@ -31,7 +31,7 @@ float rollError, rollPrevError, rollIntegral, rollOutput;
 float yawError, yawPrevError, yawIntegral, yawOutput;
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   Wire.begin();
   pinMode(buttonPin, INPUT_PULLUP);
 
@@ -41,7 +41,8 @@ void setup() {
 
   if (!mpu.testConnection()) {
     Serial.println("MPU6050 FAILED");
-    while (1);
+  } else {
+    Serial.println("MPU6050 SUCCESS");
   }
 }
 
@@ -90,7 +91,9 @@ void loop() {
     yawPrevError = yawError;
 
     // --- Print all three axes while button is pressed ---
-    if (digitalRead(buttonPin) == LOW) { // button wired to GND
+    Serial.begin(9600);
+    int buttonValue = analogRead(buttonPin);
+    if (buttonValue > 500) { // button wired to GND
       Serial.println("Pitch: "); Serial.print(fusedAngles.pitch);
       Serial.println(" | PID: "); Serial.print(pitchOutput);
 
@@ -99,6 +102,8 @@ void loop() {
 
       Serial.println(" || Yaw: "); Serial.print(yawMeasured);
       Serial.println(" | PID: "); Serial.println(yawOutput);
+    } else {
+      Serial.println("button released...");
     }
   }
 }
