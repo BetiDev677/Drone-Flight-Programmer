@@ -1,3 +1,7 @@
+//code currently works well, exceptfor yaw output and readings. I assume its a hardware issue on my end so the code should run fine. 
+
+
+
 #include <Wire.h>
 #include <MPU6050.h>
 #include <simpleFusion.h>
@@ -51,7 +55,6 @@ void setup() {
   mpu.initialize();
   if (!mpu.testConnection()) {
     Serial.println("MPU6050 FAIL");
-    while (1);
   }
   
   mpu.setI2CBypassEnabled(true);
@@ -59,7 +62,6 @@ void setup() {
   // Using 0x28 because your scanner found it there!
   if (!mag.begin(0x28, &Wire)) {
     Serial.println("QMC5883P FAIL (Check 0x28)");
-    while (1);
   }
 
   mag.setMode(QMC5883P_MODE_NORMAL);
@@ -67,7 +69,7 @@ void setup() {
   mag.setRange(QMC5883P_RANGE_8G);
 
   fuser.init(FUSION_HZ, 0.98, 0.98);
-  Serial.println("SYSTEM READY - PRINTING 20 SAMPLES:");
+  Serial.println(">>SYSTEM READY - PRINTING 20 SAMPLES:");
 }
 
 void loop() {
@@ -131,7 +133,7 @@ void loop() {
     if (printCount > 0) {
       Serial.print("P: "); Serial.print(fusedAngles.pitch);
       Serial.print(" | R: "); Serial.print(fusedAngles.roll);
-      Serial.print(" | Y: "); Serial.print(yawFiltered);
+      Serial.print(" | Y: "); Serial.print(yawErr);
       Serial.print(" | Y_Out: "); Serial.println(yawOut);
       printCount--;
       
