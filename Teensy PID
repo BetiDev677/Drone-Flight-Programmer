@@ -1,109 +1,143 @@
 #include <Wire.h>
 #include <MPU6050.h>
-#include <QMC5883LCompass.h>
 #include <simpleFusion.h>
+#include <Adafruit_QMC5883P.h>
 
+// --- OBJECTS ---
 MPU6050 mpu;
-QMC5883LCompass compass;
 SimpleFusion fuser;
 FusedAngles fusedAngles;
+Adafruit_QMC5883P mag;
 
-const int buttonPin = A0;
-
-// MPU constants
+// --- CONSTANTS ---
+const int buttonPin = 7; 
 const float ACCEL_SCALE = 16384.0;
 const float GYRO_SCALE  = 131.0;
 const float G = 9.80665;
+const float FUSION_HZ = 200.0;
+const float DT = 1.0 / FUSION_HZ;
+const float DECLINATION = 0.0; // Lookup your city's declination
 
-// Target angles
-float targetPitch = 0.0;
-float targetRoll  = 0.0;
-float targetYaw   = 0.0;
+// --- PID GAINS ---
+float Kp_roll = 42, Kp_pitch = 44, Kp_yaw = 40;
+float Ki_roll = 77, Ki_pitch = 77, Ki_yaw = 80;
+float Kd_roll = 22, Kd_pitch = 24, Kd_yaw = 0;
 
-// PID gains
-float Kp_roll = 42, Kp_pitch = 44, Kp_yaw = 40; //roll: 40-45 pitch: 42-48
-float Ki_roll = 77, Ki_pitch = 77, Ki_yaw = 80; //roll & pitch: 75-85
-float Kd_roll = 22, Kd_pitch = 24, Kd_yaw = 0; // roll: 20-28 pitch: 22-30
+// --- FILTERING & SETPOINTS ---
+float targetPitch = 0.0, targetRoll = 0.0, targetYaw = 0.0;
+float yawFiltered = 0.0;
+const float yawAlpha = 0.85; 
+const float dAlpha = 0.7;
 
-// PID state for all axes
-float pitchError, pitchPrevError, pitchIntegral, pitchOutput;
-float rollError, rollPrevError, rollIntegral, rollOutput;
-float yawError, yawPrevError, yawIntegral, yawOutput;
+// --- PID STATES ---
+float pitchErr, pitchPrev, pitchI, pitchOut, pitchD_f;
+float rollErr,  rollPrev,  rollI,  rollOut,  rollD_f;
+float yawErr,   yawPrev,   yawI,   yawOut,   yawD_f;
+
+int printCount = 20; // Number of times to print before stopping
+
+float wrapAngle(float angle) {
+  while (angle > 180.0) angle -= 360.0;
+  while (angle < -180.0) angle += 360.0;
+  return angle;
+}
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Wire.begin();
+  
   pinMode(buttonPin, INPUT_PULLUP);
 
   mpu.initialize();
-  compass.init();
-  fuser.init(200, 0.98, 0.98);  // 200 Hz fusion
-
   if (!mpu.testConnection()) {
-    Serial.println("MPU6050 FAILED");
-  } else {
-    Serial.println("MPU6050 SUCCESS");
+    Serial.println("MPU6050 FAIL");
+    while (1);
   }
+  
+  mpu.setI2CBypassEnabled(true);
+
+  // Using 0x28 because your scanner found it there!
+  if (!mag.begin(0x28, &Wire)) {
+    Serial.println("QMC5883P FAIL (Check 0x28)");
+    while (1);
+  }
+
+  mag.setMode(QMC5883P_MODE_NORMAL);
+  mag.setODR(QMC5883P_ODR_200HZ);
+  mag.setRange(QMC5883P_RANGE_8G);
+
+  fuser.init(FUSION_HZ, 0.98, 0.98);
+  Serial.println("SYSTEM READY - PRINTING 20 SAMPLES:");
 }
 
 void loop() {
-  // --- Read raw sensors ---
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-  ThreeAxis accel;
-  accel.x = ax / ACCEL_SCALE * G;
-  accel.y = ay / ACCEL_SCALE * G;
-  accel.z = az / ACCEL_SCALE * G;
+  ThreeAxis accel = {ax / ACCEL_SCALE * G, ay / ACCEL_SCALE * G, az / ACCEL_SCALE * G};
+  ThreeAxis gyro = {gx / GYRO_SCALE * DEG_TO_RAD, gy / GYRO_SCALE * DEG_TO_RAD, gz / GYRO_SCALE * DEG_TO_RAD};
 
-  ThreeAxis gyro;
-  gyro.x = gx / GYRO_SCALE * DEG_TO_RAD;
-  gyro.y = gy / GYRO_SCALE * DEG_TO_RAD;
-  gyro.z = gz / GYRO_SCALE * DEG_TO_RAD;
-
-  // --- Update fusion (200 Hz) ---
   if (fuser.shouldUpdateData()) {
     fuser.getFilteredAngles(accel, gyro, &fusedAngles, UNIT_DEGREES);
 
-    float dt = 1.0 / 200.0; // matches fuser.init(200,...)
+    // --- TILT COMPENSATED MAG ---
+    float mx = 0, my = 0, mz = 0;
+    if (mag.isDataReady()) {
+      int16_t x, y, z;
+      if (mag.getRawMagnetic(&x, &y, &z)) {
+        mag.getGaussField(&mx, &my, &mz); 
+      }
+    }
 
-    // --- Pitch PID ---
-    pitchError = targetPitch - fusedAngles.pitch;
-    pitchIntegral += pitchError * dt;
-    float pitchDerivative = (pitchError - pitchPrevError) / dt;
-    pitchOutput = Kp_pitch*pitchError + Ki_pitch*pitchIntegral + Kd_pitch*pitchDerivative;
-    pitchPrevError = pitchError;
+    float phi = fusedAngles.roll * DEG_TO_RAD;
+    float theta = fusedAngles.pitch * DEG_TO_RAD;
 
-    // --- Roll PID ---
-    rollError = targetRoll - fusedAngles.roll;
-    rollIntegral += rollError * dt;
-    float rollDerivative = (rollError - rollPrevError) / dt;
-    rollOutput = Kp_roll*rollError + Ki_roll*rollIntegral + Kd_roll*rollDerivative;
-    rollPrevError = rollError;
+    float Xh = mx * cos(theta) + mz * sin(theta);
+    float Yh = mx * sin(phi) * sin(theta) + my * cos(phi) - mz * sin(phi) * cos(theta);
 
-    // --- Yaw PID ---
-    compass.read();
-    float yawMeasured = compass.getAzimuth();
-    yawError = targetYaw - yawMeasured;
-    yawIntegral += yawError * dt;
-    float yawDerivative = (yawError - yawPrevError) / dt;
-    yawOutput = Kp_yaw*yawError + Ki_yaw*yawIntegral + Kd_yaw*yawDerivative;
-    yawPrevError = yawError;
+    float yawRaw = atan2(Yh, Xh) * RAD_TO_DEG;
+    yawRaw += DECLINATION;
+    if (yawRaw < 0) yawRaw += 360.0;
+    if (yawRaw > 360.0) yawRaw -= 360.0;
 
-    // --- Print all three axes while button is pressed ---
-    Serial.begin(9600);
-    int buttonValue = analogRead(buttonPin);
-    if (buttonValue > 500) { // button wired to GND
-      Serial.println("Pitch: "); Serial.print(fusedAngles.pitch);
-      Serial.println(" | PID: "); Serial.print(pitchOutput);
+    yawFiltered = yawAlpha * yawFiltered + (1.0 - yawAlpha) * yawRaw;
 
-      Serial.println(" || Roll: "); Serial.print(fusedAngles.roll);
-      Serial.println(" | PID: "); Serial.print(rollOutput);
+    // --- PID LOGIC ---
+    // Pitch
+    pitchErr = targetPitch - fusedAngles.pitch;
+    pitchI += pitchErr * DT;
+    float pitchD = (pitchErr - pitchPrev) / DT;
+    pitchD_f = dAlpha * pitchD_f + (1.0 - dAlpha) * pitchD;
+    pitchOut = Kp_pitch * pitchErr + Ki_pitch * pitchI + Kd_pitch * pitchD_f;
+    pitchPrev = pitchErr;
 
-      Serial.println(" || Yaw: "); Serial.print(yawMeasured);
-      Serial.println(" | PID: "); Serial.println(yawOutput);
-    } else {
-      Serial.println("button released...");
+    // Roll
+    rollErr = targetRoll - fusedAngles.roll;
+    rollI += rollErr * DT;
+    float rollD = (rollErr - rollPrev) / DT;
+    rollD_f = dAlpha * rollD_f + (1.0 - dAlpha) * rollD;
+    rollOut = Kp_roll * rollErr + Ki_roll * rollI + Kd_roll * rollD_f;
+    rollPrev = rollErr;
+
+    // Yaw
+    yawErr = wrapAngle(targetYaw - yawFiltered);
+    yawI += yawErr * DT;
+    float yawD = (yawErr - yawPrev) / DT;
+    yawD_f = dAlpha * yawD_f + (1.0 - dAlpha) * yawD;
+    yawOut = Kp_yaw * yawErr + Ki_yaw * yawI + Kd_yaw * yawD_f;
+    yawPrev = yawErr;
+
+    // --- PRINTING LOGIC ---
+    if (printCount > 0) {
+      Serial.print("P: "); Serial.print(fusedAngles.pitch);
+      Serial.print(" | R: "); Serial.print(fusedAngles.roll);
+      Serial.print(" | Y: "); Serial.print(yawFiltered);
+      Serial.print(" | Y_Out: "); Serial.println(yawOut);
+      printCount--;
+      
+      if(printCount == 0) {
+        Serial.println(">> LIMIT REACHED. PRINTING STOPPED.");
+      }
     }
   }
 }
