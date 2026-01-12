@@ -1,203 +1,86 @@
-//during gyro calibration, keep sensors still to let them calculate bias. 
+//to stop integral windup, 0.2 = 0.00 deg 
 
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 #include <Wire.h>
-#include <MPU6050.h>
-#include <simpleFusion.h>
 #include <QMC5883LCompass.h>
+#include <PID_v1_bc.h>
 
-MPU6050 mpu;
-SimpleFusion fusion;
-FusedAngles angles;
-QMC5883LCompass mag;
+// Sensor Objects
+Adafruit_MPU6050 mpu;
+QMC5883LCompass compass;
 
-// constants
-const float FUSION_HZ = 200.0f;
-const float DT = 1.0f / FUSION_HZ;
-const float ACCEL_SCALE = 16384.0f;
-const float GYRO_SCALE  = 131.0f;
-const float G = 9.80665f;
-const float DECLINATION = -3.0f;
+// PID Variables
+double setR = 0, inputR, outR; // Roll
+double setP = 0, inputP, outP; // Pitch
+double setY = 0, inputY, outY; // Yaw
 
-// PID gains
-float Kp_roll  = 42, Ki_roll  = 77, Kd_roll  = 22;
-float Kp_pitch = 44, Ki_pitch = 77, Kd_pitch = 24;
-float Kp_yaw   = 40, Ki_yaw   = 80, Kd_yaw   = 0;
+// TUNING: Start with Ki = 0 to verify the "creep" is gone, then add tiny amounts (e.g., 0.01)
+double Kp = 2.0, Ki = 0.0, Kd = 1.0; 
 
-// targets
-float targetRoll  = 0.0f;
-float targetPitch = 0.0f;
-float targetYaw   = 0.0f;
+PID pidR(&inputR, &outR, &setR, Kp, Ki, Kd, DIRECT);
+PID pidP(&inputP, &outP, &setP, Kp, Ki, Kd, DIRECT);
+PID pidY(&inputY, &outY, &setY, Kp, Ki, Kd, DIRECT);
 
-// PID states
-float rollI, pitchI, yawI;
-float rollPrev, pitchPrev, yawPrev;
-float yawD_f;
-
-// PID outputs
-float rollPID, pitchPID, yawPID;
-
-// yaw filtering
-float yawFiltered = 0.0f;
-const float yawAlpha = 0.95f;
-const float dAlpha   = 0.7f;
-
-// printing
-int printCount = 30;
-
-// warm-up frames before using PID
-int warmupFrames = 100;
-
-// gyro bias
-float gyroBiasX = 0, gyroBiasY = 0, gyroBiasZ = 0;
-const int gyroSamples = 1000;
-
-// clamp PID outputs
-const float PID_LIMIT = 300.0f;
-
-// wrap angle to [-180,180]
-float wrap180(float a) {
-  while (a > 180) a -= 360;
-  while (a < -180) a += 360;
-  return a;
-}
-
-// simple gyro calibration
-void calibrateGyro() {
-  long sumX = 0, sumY = 0, sumZ = 0;
-  Serial.println(">> CALIBRATING GYRO - KEEP BOARD STILL");
-  for (int i = 0; i < gyroSamples; i++) {
-    int16_t gx, gy, gz, ax, ay, az;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    sumX += gx;
-    sumY += gy;
-    sumZ += gz;
-  }
-  gyroBiasX = sumX / (float)gyroSamples;
-  gyroBiasY = sumY / (float)gyroSamples;
-  gyroBiasZ = sumZ / (float)gyroSamples;
-  Serial.print(">> Gyro bias: X="); Serial.print(gyroBiasX);
-  Serial.print(" Y="); Serial.print(gyroBiasY);
-  Serial.print(" Z="); Serial.println(gyroBiasZ);
-  Serial.println(">> CALIBRATION DONE");
-}
+// Filter Variables
+float roll = 0, pitch = 0, yaw = 0;
+unsigned long lastTime;
 
 void setup() {
   Serial.begin(115200);
   Wire.begin();
 
-  mpu.initialize();
-  mpu.setI2CBypassEnabled(true);
+  if (!mpu.begin()) { while (1); }
+  mpu.setI2CBypass(true); 
+  compass.init();
 
-  mag.init();
-  mag.setCalibrationOffsets(0, 0, 0);
-  mag.setCalibrationScales(1.0, 1.0, 1.0);
+  // Initialize PID Settings
+  pidR.SetMode(AUTOMATIC);
+  pidP.SetMode(AUTOMATIC);
+  pidY.SetMode(AUTOMATIC);
 
-  fusion.init(FUSION_HZ, 0.98, 0.98);
+  // LIMITS: Essential for Anti-Windup in the _bc library
+  pidR.SetOutputLimits(-255, 255);
+  pidP.SetOutputLimits(-255, 255);
+  pidY.SetOutputLimits(-255, 255);
 
-  calibrateGyro(); // take gyro bias once
-
-  Serial.println(">> DRONE PID SYSTEM READY");
-  Serial.println(">> Send 'p' to print 30 lines");
+  lastTime = millis();
 }
 
 void loop() {
-  // command to reset print
-  if (Serial.available()) {
-    char cmd = Serial.read();
-    if (cmd == 'p' || cmd == 'P') {
-      printCount = 30;
-      rollI = pitchI = yawI = 0;
-      rollPrev = pitchPrev = yawPrev = 0;
-      yawD_f = 0;
-      Serial.println(">> PRINT ENABLED"); 
-    }
-  }
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+  compass.read();
 
-  // read sensors
-  int16_t ax, ay, az, gx, gy, gz;
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  float dt = (millis() - lastTime) / 1000.0;
+  lastTime = millis();
 
-  // subtract gyro bias
-  ThreeAxis gyro = {
-    (gx - gyroBiasX) / GYRO_SCALE * DEG_TO_RAD,
-    (gy - gyroBiasY) / GYRO_SCALE * DEG_TO_RAD,
-    (gz - gyroBiasZ) / GYRO_SCALE * DEG_TO_RAD
-  };
+  // --- 1. SENSOR FUSION (Angle Calculation) ---
+  float accPitch = atan2(a.acceleration.y, a.acceleration.z) * 180 / PI;
+  float accRoll  = atan2(-a.acceleration.x, sqrt(a.acceleration.y * a.acceleration.y + a.acceleration.z * a.acceleration.z)) * 180 / PI;
+  float magHeading = atan2(compass.getY(), compass.getX()) * 180 / PI;
 
-  ThreeAxis accel = {
-    ax / ACCEL_SCALE * G,
-    ay / ACCEL_SCALE * G,
-    az / ACCEL_SCALE * G
-  };
+  // Complementary Filter
+  pitch = 0.98 * (pitch + g.gyro.x * 180/PI * dt) + 0.02 * accPitch;
+  roll  = 0.98 * (roll + g.gyro.y * 180/PI * dt) + 0.02 * accRoll;
+  yaw   = 0.95 * (yaw + g.gyro.z * 180/PI * dt) + 0.05 * magHeading;
 
-  if (!fusion.shouldUpdateData()) return;
+  // --- 2. THE ANTI-CREEP FIX (Deadband) ---
+  // If error is less than 0.5 degrees, we force input to match setpoint
+  // This stops the 'I' term from accumulating tiny errors while sitting still.
+  inputR = (abs(roll - setR) < 0.5) ? setR : roll;
+  inputP = (abs(pitch - setP) < 0.5) ? setP : pitch;
+  inputY = (abs(yaw - setY) < 0.5) ? setY : yaw;
 
-  fusion.getFilteredAngles(accel, gyro, &angles, UNIT_DEGREES);
+  // --- 3. COMPUTE ---
+  pidR.Compute();
+  pidP.Compute();
+  pidY.Compute();
 
-  // skip first warm-up frames
-  if (warmupFrames > 0) {
-    warmupFrames--;
-    return;
-  }
+  // --- 4. OUTPUT / DEBUG ---
+  Serial.print("P:"); Serial.print(outP); 
+  Serial.print(" R:"); Serial.print(outR); 
+  Serial.print(" Y:"); Serial.println(outY);
 
-  // read mag
-  mag.read();
-  float mx = mag.getX();
-  float my = mag.getY();
-  float mz = mag.getZ();
-
-  float rollRad  = angles.roll  * DEG_TO_RAD;
-  float pitchRad = angles.pitch * DEG_TO_RAD;
-
-  float Xh = mx * cos(pitchRad) + mz * sin(pitchRad);
-  float Yh = mx * sin(rollRad) * sin(pitchRad)
-           + my * cos(rollRad)
-           - mz * sin(rollRad) * cos(pitchRad);
-
-  float yawRaw = atan2(Yh, Xh) * RAD_TO_DEG + DECLINATION;
-  yawRaw = wrap180(yawRaw);
-
-  float yawDiff = wrap180(yawRaw - yawFiltered);
-  yawFiltered += (1.0f - yawAlpha) * yawDiff;
-  yawFiltered = wrap180(yawFiltered);
-
-  // roll PID
-  float rollErr = targetRoll - angles.roll;
-  rollI = constrain(rollI + rollErr * DT, -100, 100);
-  rollPID = Kp_roll * rollErr
-          + Ki_roll * rollI
-          + Kd_roll * (rollErr - rollPrev) / DT;
-  rollPrev = rollErr;
-
-  // pitch PID
-  float pitchErr = targetPitch - angles.pitch;
-  pitchI = constrain(pitchI + pitchErr * DT, -100, 100);
-  pitchPID = Kp_pitch * pitchErr
-           + Ki_pitch * pitchI
-           + Kd_pitch * (pitchErr - pitchPrev) / DT;
-  pitchPrev = pitchErr;
-
-  // yaw PID
-  float yawErr = wrap180(targetYaw - yawFiltered);
-  yawI = constrain(yawI + yawErr * DT, -50, 50);
-  float yawD = (yawErr - yawPrev) / DT;
-  yawD_f = dAlpha * yawD_f + (1.0f - dAlpha) * yawD;
-  yawPID = Kp_yaw * yawErr + Ki_yaw * yawI + Kd_yaw * yawD_f;
-  yawPrev = yawErr;
-
-  // clamp outputs
-  rollPID  = constrain(rollPID,  -PID_LIMIT, PID_LIMIT);
-  pitchPID = constrain(pitchPID, -PID_LIMIT, PID_LIMIT);
-  yawPID   = constrain(yawPID,   -PID_LIMIT, PID_LIMIT);
-
-  // print limited lines
-  if (printCount > 0) {
-    Serial.print("Roll:");   Serial.print(angles.roll, 1);
-    Serial.print(" PID:");   Serial.print(rollPID, 1);
-    Serial.print(" | Pitch:"); Serial.print(angles.pitch, 1);
-    Serial.print(" PID:");   Serial.print(pitchPID, 1);
-    Serial.print(" | Yaw:"); Serial.print(yawFiltered, 1);
-    Serial.print(" PID:");   Serial.println(yawPID, 1);
-    printCount--;
-  }
+  delay(10); 
 }
