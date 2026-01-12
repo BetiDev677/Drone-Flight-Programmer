@@ -55,7 +55,7 @@ void loop() {
   float dt = (millis() - lastTime) / 1000.0;
   lastTime = millis();
 
-  // --- 1. SENSOR FUSION (Angle Calculation) ---
+//fusion
   float accPitch = atan2(a.acceleration.y, a.acceleration.z) * 180 / PI;
   float accRoll  = atan2(-a.acceleration.x, sqrt(a.acceleration.y * a.acceleration.y + a.acceleration.z * a.acceleration.z)) * 180 / PI;
   float magHeading = atan2(compass.getY(), compass.getX()) * 180 / PI;
@@ -65,19 +65,17 @@ void loop() {
   roll  = 0.98 * (roll + g.gyro.y * 180/PI * dt) + 0.02 * accRoll;
   yaw   = 0.95 * (yaw + g.gyro.z * 180/PI * dt) + 0.05 * magHeading;
 
-  // --- 2. THE ANTI-CREEP FIX (Deadband) ---
+
   // If error is less than 0.5 degrees, we force input to match setpoint
   // This stops the 'I' term from accumulating tiny errors while sitting still.
   inputR = (abs(roll - setR) < 0.5) ? setR : roll;
   inputP = (abs(pitch - setP) < 0.5) ? setP : pitch;
   inputY = (abs(yaw - setY) < 0.5) ? setY : yaw;
 
-  // --- 3. COMPUTE ---
   pidR.Compute();
   pidP.Compute();
   pidY.Compute();
 
-  // --- 4. OUTPUT / DEBUG ---
   Serial.print("P:"); Serial.print(outP); 
   Serial.print(" R:"); Serial.print(outR); 
   Serial.print(" Y:"); Serial.println(outY);
