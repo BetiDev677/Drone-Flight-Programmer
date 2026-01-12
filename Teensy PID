@@ -1,4 +1,4 @@
-//to stop integral windup, 0.2 = 0.00 deg 
+//to stop integral windup, 0.2 = 0.00 deg for PID
 
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
