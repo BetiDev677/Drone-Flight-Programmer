@@ -5,10 +5,12 @@
 #include <Wire.h>
 #include <QMC5883LCompass.h>
 #include <PID_v1_bc.h>
+#include <Servo.h>
 
 // Sensor Objects
 Adafruit_MPU6050 mpu;
 QMC5883LCompass compass;
+Servo m1, m2, m3, m4;
 
 // PID Variables
 double setR = 0, inputR, outR; // Roll
@@ -25,12 +27,21 @@ PID pidY(&inputY, &outY, &setY, Kp, Ki, Kd, DIRECT);
 // Filter Variables
 float roll = 0, pitch = 0, yaw = 0;
 unsigned long lastTime;
+int throttle = 1100; //Idle, set 1000 to keep motor off
 
 void setup() {
   Serial.begin(115200);
   Wire.begin();
-
-  if (!mpu.begin()) { while (1); }
+  m1.attach(2, 1000, 2000);
+  m1.attach(3, 1000, 2000);
+  m1.attach(4, 1000, 2000);
+  m1.attach(5, 1000, 2000);
+  m1.writeMicroseconds(1000); 
+  m2.writeMicroseconds(1000); 
+  m3.writeMicroseconds(1000); 
+  m4.writeMicroseconds(1000); 
+  delay(20);
+  if (!mpu.begin()) { Serial.println("MPU failed to connect"); }
   mpu.setI2CBypass(true); 
   compass.init();
 
@@ -39,7 +50,7 @@ void setup() {
   pidP.SetMode(AUTOMATIC);
   pidY.SetMode(AUTOMATIC);
 
-  // LIMITS: Essential for Anti-Windup in the _bc library
+  // Limits for Anti-Windup in the _bc library
   pidR.SetOutputLimits(-255, 255);
   pidP.SetOutputLimits(-255, 255);
   pidY.SetOutputLimits(-255, 255);
@@ -76,9 +87,18 @@ void loop() {
   pidP.Compute();
   pidY.Compute();
 
-  Serial.print("P:"); Serial.print(outP); 
-  Serial.print(" R:"); Serial.print(outR); 
-  Serial.print(" Y:"); Serial.println(outY);
+  int s1 = throttle - outP + outR + outY; // Front Right (CCW)
+  int s2 = throttle + outP + outR - outY; // Back Right (CW)
+  int s3 = throttle + outP - outR + outY; // Back Left (CCW)
+  int s4 = throttle - outP - outR - outY; // Front Left (CW)
+  Serial.print(s1);
+  Serial.print(s2);
+  Serial.print(s3);
+  Serial.print(s4);
+  m1.writeMicroseconds(constrain(s1, 1000, 2000));
+  m2.writeMicroseconds(constrain(s2, 1000, 2000));
+  m3.writeMicroseconds(constrain(s3, 1000, 2000));
+  m4.writeMicroseconds(constrain(s4, 1000, 2000));
 
   delay(10); 
 }
