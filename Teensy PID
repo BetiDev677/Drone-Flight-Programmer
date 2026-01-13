@@ -33,13 +33,15 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
   m1.attach(2, 1000, 2000);
-  m1.attach(3, 1000, 2000);
-  m1.attach(4, 1000, 2000);
-  m1.attach(5, 1000, 2000);
+  m2.attach(3, 1000, 2000);
+  m3.attach(4, 1000, 2000);
+  m4.attach(5, 1000, 2000);
+  
   m1.writeMicroseconds(1000); 
   m2.writeMicroseconds(1000); 
   m3.writeMicroseconds(1000); 
   m4.writeMicroseconds(1000); 
+  
   delay(20);
   if (!mpu.begin()) { Serial.println("MPU failed to connect"); }
   mpu.setI2CBypass(true); 
@@ -100,5 +102,11 @@ void loop() {
   m3.writeMicroseconds(constrain(s3, 1000, 2000));
   m4.writeMicroseconds(constrain(s4, 1000, 2000));
 
-  delay(10); 
+  //print motor output 
+  Serial.print("s1 "); Serial.print(s1);
+  Serial.print(" s2 "); Serial.print(s2);
+  Serial.print(" s3 "); Serial.print(s3);
+  Serial.print(" s4 "); Serial.println(s4);
+
+  delay(5); 
 }
